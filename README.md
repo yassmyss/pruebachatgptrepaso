@@ -1,110 +1,152 @@
 # SupportRAG Agent
 
-> Agentic RAG assistant for IT support built with Python, LangChain, LangGraph, semantic search and a vector database.
+Sistema inteligente de soporte técnico basado en **RAG (Retrieval-Augmented Generation)** y orquestación mediante grafos. Recupera información relevante desde una base de conocimiento, genera respuestas fundamentadas en la documentación disponible y devuelve las fuentes utilizadas para facilitar su verificación.
 
-SupportRAG Agent is a compact portfolio project that demonstrates how a support assistant can answer technical incidents using **retrieved evidence instead of relying only on an LLM's internal knowledge**.
+Desarrollado en **Python** con **FastAPI, LangChain, LangGraph, embeddings, búsqueda semántica, Chroma y modelos de lenguaje (LLM)**.
 
-The project is intentionally small: the goal is to make the architecture easy to understand, run and discuss in a technical interview.
+## Objetivo
 
-## What it demonstrates
+SupportRAG Agent plantea una arquitectura extensible para asistentes de soporte técnico N1/N2 capaces de:
 
-- Python backend development with **FastAPI**
-- LLM integration
-- **RAG (Retrieval-Augmented Generation)**
-- embeddings and semantic search
-- vector storage with **Chroma**
-- document loading and retrieval with **LangChain**
-- workflow orchestration with **LangGraph**
-- grounded answers with source attribution
-- Pydantic validation
-- basic automated tests
-- Docker packaging
-- safe escalation when the knowledge base is insufficient
+- recibir incidencias mediante una API REST;
+- clasificar la consulta;
+- localizar procedimientos mediante búsqueda semántica;
+- recuperar los fragmentos documentales más relevantes;
+- generar respuestas contextualizadas mediante un LLM;
+- identificar las fuentes utilizadas;
+- limitar respuestas no respaldadas por la documentación;
+- recomendar escalado cuando la información disponible no sea suficiente.
 
-## Use case
+El modelo no actúa como única fuente de conocimiento: la respuesta se construye a partir de información recuperada de una base documental controlada.
 
-A user reports an IT incident such as:
+## Arquitectura
 
 ```text
-Docker Desktop does not start after a Windows update and WSL shows an error.
+                         ┌──────────────────┐
+                         │     Cliente      │
+                         └────────┬─────────┘
+                                  │ POST /ask
+                                  ▼
+                         ┌──────────────────┐
+                         │     FastAPI      │
+                         └────────┬─────────┘
+                                  ▼
+                         ┌──────────────────┐
+                         │    LangGraph     │
+                         │ Estado del flujo │
+                         └────────┬─────────┘
+                                  │
+                    ┌─────────────┼─────────────┐
+                    ▼             ▼             ▼
+               Clasificación  Recuperación  Generación
+                                  │
+                                  ▼
+                         ┌──────────────────┐
+                         │    LangChain     │
+                         │    Retriever     │
+                         └────────┬─────────┘
+                                  ▼
+                         ┌──────────────────┐
+                         │    Embeddings    │
+                         └────────┬─────────┘
+                                  ▼
+                         ┌──────────────────┐
+                         │      Chroma      │
+                         │  Vector Store    │
+                         └────────┬─────────┘
+                                  ▼
+                         Base de conocimiento
 ```
 
-Instead of asking the LLM to invent a generic solution, the application:
+## Flujo de procesamiento
 
-1. receives the incident through a REST API;
-2. classifies the incident;
-3. converts the query into an embedding;
-4. performs semantic retrieval over the support knowledge base;
-5. injects the relevant chunks into the LLM context;
-6. generates a grounded troubleshooting response;
-7. returns the answer together with the source documents.
+### 1. Recepción de la incidencia
 
-If the retrieved information is insufficient, the prompt instructs the model to recommend escalation rather than fabricate a procedure.
+FastAPI expone el endpoint `POST /ask`, que recibe una consulta técnica en lenguaje natural.
 
-## Architecture
+### 2. Clasificación
+
+LangGraph inicia el flujo y asigna una categoría a la incidencia. El MVP contempla redes, contenedores, bases de datos, Windows, almacenamiento y categoría general.
+
+### 3. Procesamiento documental
+
+Los documentos Markdown de `knowledge_base/` se dividen mediante `RecursiveCharacterTextSplitter`.
+
+Configuración actual:
+
+- fragmentos de 700 caracteres;
+- solapamiento de 120 caracteres.
+
+El solapamiento ayuda a conservar contexto cuando una explicación queda dividida entre fragmentos.
+
+### 4. Embeddings
+
+Cada fragmento se transforma en una representación vectorial. Esto permite recuperar información por similitud semántica y no únicamente por coincidencia literal de palabras.
+
+### 5. Base de datos vectorial
+
+Los vectores se almacenan en **Chroma**. Ante una consulta, el sistema genera su embedding y recupera los fragmentos semánticamente más próximos.
+
+El número de resultados puede configurarse mediante `TOP_K`.
+
+### 6. Generación aumentada por recuperación
+
+Los documentos recuperados se incorporan al contexto del LLM. El modelo recibe instrucciones para utilizar la evidencia disponible, no inventar procedimientos ni credenciales y recomendar escalado cuando el contexto sea insuficiente.
+
+### 7. Respuesta y trazabilidad
+
+La API devuelve:
+
+- categoría detectada;
+- respuesta generada;
+- documentos utilizados;
+- extractos de las fuentes recuperadas.
+
+## LangChain
+
+LangChain implementa los componentes principales del pipeline RAG:
+
+- documentos;
+- fragmentación de texto;
+- embeddings;
+- integración con Chroma;
+- recuperación semántica;
+- composición del prompt;
+- integración con el LLM.
+
+## LangGraph
+
+LangGraph modela la ejecución como un grafo con estado.
 
 ```text
-                 ┌──────────────┐
-                 │    Client    │
-                 └──────┬───────┘
-                        │ POST /ask
-                        ▼
-                 ┌──────────────┐
-                 │   FastAPI    │
-                 └──────┬───────┘
-                        ▼
-                 ┌──────────────┐
-                 │  LangGraph   │
-                 │    State     │
-                 └──────┬───────┘
-                        │
-          ┌─────────────┼─────────────┐
-          ▼             ▼             ▼
-      classify       retrieve       answer
-                        │
-                        ▼
-                 ┌──────────────┐
-                 │  LangChain   │
-                 │  Retriever   │
-                 └──────┬───────┘
-                        ▼
-                 ┌──────────────┐
-                 │ Embeddings   │
-                 └──────┬───────┘
-                        ▼
-                 ┌──────────────┐
-                 │   Chroma     │
-                 │ Vector Store │
-                 └──────┬───────┘
-                        ▼
-                 Knowledge Base
+START
+  │
+  ▼
+classify
+  │
+  ▼
+retrieve
+  │
+  ▼
+answer
+  │
+  ▼
+ END
 ```
 
-## Why LangChain and LangGraph?
+Esta separación permite evolucionar la arquitectura incorporando rutas condicionales, herramientas, reintentos, evaluación de evidencia y escalado sin concentrar toda la lógica en una única cadena.
 
-They solve different problems.
-
-**LangChain** provides the RAG building blocks: documents, text splitting, embeddings, vector store integration and retrieval.
-
-**LangGraph** controls the application workflow and state. The current MVP uses three explicit nodes:
+## Estructura
 
 ```text
-START -> classify -> retrieve -> answer -> END
-```
-
-This separation makes it straightforward to evolve the MVP into a more agentic system with conditional routing, tools, retries, confidence checks and human escalation.
-
-## Project structure
-
-```text
-.
+support-rag-agent/
 ├── app/
 │   ├── __init__.py
-│   ├── config.py        # environment configuration
-│   ├── graph.py         # LangGraph workflow
-│   ├── main.py          # FastAPI endpoints
-│   ├── rag.py           # ingestion, embeddings and retriever
-│   └── schemas.py       # API models
+│   ├── config.py        # Configuración
+│   ├── graph.py         # Flujo LangGraph
+│   ├── main.py          # API FastAPI
+│   ├── rag.py           # Ingesta, embeddings y recuperación
+│   └── schemas.py       # Modelos Pydantic
 ├── knowledge_base/
 │   ├── docker.md
 │   ├── network.md
@@ -114,20 +156,43 @@ This separation makes it straightforward to evolve the MVP into a more agentic s
 │   └── test_api.py
 ├── .env.example
 ├── .gitignore
+├── CONTRIBUTING.md
 ├── Dockerfile
+├── README.md
 └── requirements.txt
 ```
 
-## Quick start
+## Tecnologías
 
-### 1. Clone
+| Tecnología | Función |
+|---|---|
+| Python | Lenguaje principal |
+| FastAPI | API REST |
+| Pydantic | Validación y modelos de datos |
+| LangChain | Pipeline RAG |
+| LangGraph | Orquestación y estado |
+| OpenAI | LLM y embeddings |
+| Chroma | Base de datos vectorial |
+| pytest | Pruebas automatizadas |
+| Docker | Contenerización |
+
+## Instalación
+
+### Requisitos
+
+- Python 3.11 o superior
+- pip
+- clave de API del proveedor LLM
+- Docker opcional
+
+### Clonar
 
 ```bash
-git clone https://github.com/yassmyss/pruebachatgptrepaso.git
-cd pruebachatgptrepaso
+git clone https://github.com/yassmyss/support-rag-agent.git
+cd support-rag-agent
 ```
 
-### 2. Create a virtual environment
+### Entorno virtual
 
 Windows:
 
@@ -143,40 +208,88 @@ python -m venv .venv
 source .venv/bin/activate
 ```
 
-### 3. Install dependencies
+### Dependencias
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Configure environment
+### Variables de entorno
 
-Copy `.env.example` to `.env` and add your API key.
+Crear `.env` a partir de `.env.example`:
 
 ```env
-OPENAI_API_KEY=...
+OPENAI_API_KEY=tu_clave
 OPENAI_CHAT_MODEL=gpt-4o-mini
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 TOP_K=4
 ```
 
-**Never commit the `.env` file or API keys.**
+Las credenciales nunca deben almacenarse en el repositorio.
 
-### 5. Run
+## Ejecución
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-Interactive API documentation:
+API:
+
+```text
+http://127.0.0.1:8000
+```
+
+Documentación OpenAPI:
 
 ```text
 http://127.0.0.1:8000/docs
 ```
 
-## Example
+## API
 
-Request:
+### Estado
+
+```http
+GET /health
+```
+
+```json
+{
+  "status": "ok"
+}
+```
+
+### Consulta
+
+```http
+POST /ask
+Content-Type: application/json
+```
+
+Entrada:
+
+```json
+{
+  "question": "Docker Desktop no arranca y WSL muestra un error. ¿Qué debería comprobar?"
+}
+```
+
+Salida:
+
+```json
+{
+  "category": "containers",
+  "answer": "Respuesta generada a partir de la documentación recuperada.",
+  "sources": [
+    {
+      "source": "docker.md",
+      "excerpt": "Fragmento documental utilizado como contexto..."
+    }
+  ]
+}
+```
+
+## Ejemplo con cURL
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/ask" \
@@ -184,149 +297,176 @@ curl -X POST "http://127.0.0.1:8000/ask" \
   -d "{\"question\":\"Docker Desktop no arranca y WSL muestra un error. ¿Qué compruebo?\"}"
 ```
 
-Response shape:
+## Funcionamiento del RAG
 
-```json
-{
-  "category": "containers",
-  "answer": "Pasos de diagnóstico basados en la documentación recuperada...",
-  "sources": [
-    {
-      "source": "docker.md",
-      "excerpt": "Docker Desktop / WSL..."
-    }
-  ]
-}
+```text
+Consulta
+   │
+   ▼
+Embedding
+   │
+   ▼
+Búsqueda semántica
+   │
+   ▼
+Fragmentos relevantes
+   │
+   ▼
+Contexto + consulta
+   │
+   ▼
+LLM
+   │
+   ▼
+Respuesta fundamentada
 ```
 
-## RAG flow
+Una llamada directa a un LLM depende principalmente del conocimiento contenido en el modelo. El enfoque RAG incorpora conocimiento externo y actualizable antes de generar la respuesta.
 
-### Ingestion
+### ¿Por qué RAG y no fine-tuning?
 
-Markdown documents are loaded from `knowledge_base/` and split into overlapping chunks.
+El objetivo es consultar documentación técnica que puede cambiar.
 
-### Embeddings
+RAG permite:
 
-Each chunk is converted into a vector representation using an embedding model.
+- actualizar el conocimiento modificando los documentos;
+- mantener la información separada del modelo;
+- recuperar evidencia concreta;
+- proporcionar trazabilidad mediante fuentes;
+- reducir respuestas no fundamentadas.
 
-### Semantic retrieval
+El fine-tuning resulta más adecuado para modificar comportamientos o patrones especializados del modelo que para mantener una base documental dinámica.
 
-The user's incident is embedded and Chroma retrieves the closest chunks by semantic similarity.
+## Búsqueda semántica
 
-This differs from keyword search: the query does not need to contain exactly the same words as the source document.
+Los embeddings permiten aproximar textos por significado.
 
-### Generation
+Por ejemplo:
 
-Retrieved chunks are inserted into the prompt as context. The LLM is instructed to answer only from that evidence and to escalate when evidence is insufficient.
-
-This is the **grounding** mechanism used to reduce hallucinations.
-
-## API
-
-### GET /health
-
-Simple liveness endpoint.
-
-### POST /ask
-
-Input:
-
-```json
-{
-  "question": "PostgreSQL refuses the application's connection. What should I check?"
-}
+```text
+"no puedo abrir Docker después de actualizar Windows"
 ```
 
-Output:
+puede recuperar documentación relativa a:
 
-- detected incident category;
-- grounded answer;
-- retrieved sources and excerpts.
+```text
+"Docker Desktop no inicia / problemas con WSL"
+```
 
-## Testing
+aunque las expresiones no coincidan literalmente.
+
+## Base de conocimiento
+
+El MVP incluye documentación sintética sobre:
+
+- Docker Desktop y WSL;
+- conectividad y DNS;
+- PostgreSQL;
+- almacenamiento y espacio en disco.
+
+No contiene datos de clientes, organizaciones ni sistemas reales.
+
+La arquitectura puede ampliarse para ingerir PDF, DOCX, HTML, bases de datos, APIs o repositorios documentales.
+
+## Seguridad
+
+Medidas incorporadas:
+
+- credenciales mediante variables de entorno;
+- `.env` excluido del control de versiones;
+- ausencia de credenciales en la base documental;
+- instrucciones para evitar procedimientos no documentados;
+- prohibición de mostrar credenciales;
+- escalado cuando la evidencia resulte insuficiente;
+- documentación de demostración sintética.
+
+En producción deberían incorporarse autenticación, autorización, auditoría, control de acceso documental, protección frente a prompt injection y políticas específicas para información sensible.
+
+## Pruebas
 
 ```bash
 pytest
 ```
 
-The initial test suite validates API health and request validation. A production evolution should add mocked LLM/retriever tests, retrieval evaluation and end-to-end tests.
+La versión actual comprueba:
+
+- disponibilidad del endpoint de salud;
+- validación de solicitudes incorrectas.
+
+La evolución del proyecto contempla pruebas unitarias del grafo, mocks del LLM, evaluación del retriever y pruebas end-to-end.
 
 ## Docker
 
+Construcción:
+
 ```bash
 docker build -t support-rag-agent .
+```
+
+Ejecución:
+
+```bash
 docker run --env-file .env -p 8000:8000 support-rag-agent
 ```
 
-## Design decisions
+## Limitaciones actuales
 
-### Why RAG instead of fine-tuning?
+El proyecto se encuentra en fase MVP:
 
-The problem is access to changing support documentation, not teaching the model a new language behaviour. RAG allows the knowledge base to be updated without retraining the model and makes source attribution possible.
+- base documental de demostración sintética;
+- almacén vectorial generado durante la ejecución;
+- sin autenticación;
+- sin integración con plataforma de tickets;
+- sin memoria conversacional;
+- sin dataset específico de evaluación RAG;
+- clasificación inicial basada en reglas;
+- sin ejecución de herramientas externas.
 
-### Why a vector database?
+Estas limitaciones delimitan el alcance actual y sirven como base para las siguientes iteraciones.
 
-Traditional keyword matching can miss semantically equivalent questions. Embeddings represent meaning numerically and allow semantic similarity search.
+## Evolución prevista
 
-### Why source attribution?
+- persistencia del índice vectorial;
+- PostgreSQL + pgvector;
+- ingesta de PDF, DOCX y otras fuentes;
+- rutas condicionales en LangGraph;
+- evaluación automática de relevancia;
+- reescritura de consultas cuando la recuperación sea insuficiente;
+- herramientas de diagnóstico controladas;
+- escalado human-in-the-loop;
+- integración con sistemas de tickets;
+- memoria conversacional;
+- dataset de evaluación RAG;
+- observabilidad y trazabilidad;
+- autenticación y autorización;
+- despliegue cloud;
+- AWS S3 y Amazon Bedrock;
+- CI/CD.
 
-A support system should make its evidence inspectable. Returning sources helps a technician verify the proposed procedure.
+## Principios de diseño
 
-### Why human escalation?
+### Respuestas fundamentadas
 
-An enterprise support assistant should not pretend to know an answer when evidence is weak. Escalation is safer than hallucinating destructive commands or configuration changes.
+La generación debe priorizar la evidencia recuperada frente a información no verificable del modelo.
 
-## Current limitations
+### Trazabilidad
 
-This is an MVP, not a production support platform.
+Las fuentes utilizadas forman parte de la respuesta.
 
-- the knowledge base contains synthetic demonstration procedures;
-- Chroma is created in memory when the retriever is built;
-- there is no authentication or authorization;
-- there is no ticketing-system integration;
-- retrieval quality is not yet evaluated against a golden dataset;
-- the graph currently has deterministic routing rather than autonomous tool selection.
+### Separación de responsabilidades
 
-These limitations are documented intentionally rather than hidden.
+API, recuperación documental y orquestación se mantienen desacopladas.
 
-## Roadmap
+### Extensibilidad
 
-- [ ] persistent Chroma or PostgreSQL + pgvector
-- [ ] PDF/DOCX ingestion
-- [ ] LangGraph conditional routing
-- [ ] tool calling for safe diagnostic tools
-- [ ] confidence/evidence evaluation node
-- [ ] human-in-the-loop escalation
-- [ ] ticket creation integration
-- [ ] conversation memory
-- [ ] retrieval evaluation / golden dataset
-- [ ] observability and tracing
-- [ ] AWS deployment (Bedrock/S3)
-- [ ] CI pipeline with GitHub Actions
+La arquitectura basada en grafos permite añadir etapas y decisiones sin rediseñar el sistema completo.
 
-## Interview talking points
+### Seguridad
 
-This project can be used to discuss:
+Ante falta de evidencia, el sistema debe reconocer la limitación y escalar en lugar de generar instrucciones potencialmente incorrectas.
 
-- how embeddings enable semantic search;
-- why chunk size and overlap affect retrieval;
-- RAG vs fine-tuning;
-- vector databases;
-- hallucination reduction and grounding;
-- LangChain vs LangGraph;
-- stateful workflows and agents;
-- API design with FastAPI;
-- validation with Pydantic;
-- testing and Docker;
-- guardrails and human escalation;
-- how the MVP could evolve for enterprise use.
+## Estado del proyecto
 
-## Security
-
-The repository contains no credentials. Secrets are loaded through environment variables and `.env` is ignored by Git.
-
-The sample knowledge base is synthetic and contains no real customer or company information.
-
-## Author
-
-Portfolio project focused on Python, Generative AI, RAG and agentic workflows.
+**Versión:** 0.1.0  
+**Estado:** MVP funcional · evolución activa  
+**Ámbito:** IA generativa · RAG · agentes · automatización de soporte técnico
