@@ -39,7 +39,7 @@ def retrieve(state: SupportState) -> SupportState:
 
 def answer(state: SupportState) -> SupportState:
     settings = get_settings()
-    llm = ChatOpenAI(model=settings.openai_chat_model, temperature=0)
+    llm = ChatOpenAI(\n        model=settings.openai_chat_model,\n        temperature=0,\n        api_key=settings.openai_api_key,\n    )
     context = "\n\n".join(
         f"[Fuente: {doc.metadata.get('source', 'desconocida')}]\n{doc.page_content}"
         for doc in state.get("documents", [])
