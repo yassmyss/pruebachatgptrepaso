@@ -31,7 +31,10 @@ def build_retriever():
 
     vector_store = Chroma.from_documents(
         documents=chunks,
-        embedding=OpenAIEmbeddings(\n            model=settings.openai_embedding_model,\n            api_key=settings.openai_api_key,\n        ),
+        embedding=OpenAIEmbeddings(
+            model=settings.openai_embedding_model,
+            api_key=settings.openai_api_key,
+        ),
         collection_name="support_knowledge",
     )
     return vector_store.as_retriever(search_kwargs={"k": settings.top_k})
